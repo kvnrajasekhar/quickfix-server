@@ -85,6 +85,22 @@ app.patch('/complaints/:id', async (req, res) => {
     }
 });
 
+app.delete('/complaints/:id', async (req, res) => {
+    try {
+        const complaintId = req.params.id;
+
+        const deletedComplaint = await Complaint.findByIdAndDelete(complaintId);
+
+        if (!deletedComplaint) {
+            return res.status(404).json({ message: 'Complaint not found' });
+        }
+
+        res.status(200).json({ message: 'Complaint deleted successfully' });
+    } catch (error) {
+        console.error('Error deleting complaint:', error);
+        res.status(500).json({ message: 'Failed to delete complaint', error: error.message });
+    }
+});
 
 app.get('/', (req, res) => {
     res.send("Hello from the quickfix server");
