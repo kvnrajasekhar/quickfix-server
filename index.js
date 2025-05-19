@@ -12,7 +12,6 @@ console.log(MONGO_URL);
 app.use(cors({
     origin: '*',
     methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE'],
-    credentials: true,
 }));
 
 mongoose.connect(MONGO_URL)
