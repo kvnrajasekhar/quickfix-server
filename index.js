@@ -3,32 +3,60 @@ const app = express();
 const mongoose = require('mongoose');
 const cors = require('cors');
 require('dotenv').config();
-const moment = require('moment-timezone'); 
+const moment = require('moment-timezone');
 
 app.use(express.json());
 
+// Use environment variable directly
 const MONGO_URL = process.env.MONGO_URL;
-console.log(MONGO_URL);
 
+// CORS configuration
 app.use(cors({
     origin: '*',
     methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE'],
 }));
 
-mongoose.connect(MONGO_URL)
-    .then(() => {
-        console.log('MongoDB connected');
-    })
-    .catch(err => {
-        console.error('MongoDB initial connection error:', err);
-    });
+let mongooseConnection; // Store the connection
 
+const connectToDatabase = async () => {
+    if (!mongooseConnection) {
+        try {
+            mongoose.set('strictQuery', false); 
+            mongooseConnection = await mongoose.connect(MONGO_URL, {
+                useNewUrlParser: true, 
+                useUnifiedTopology: true,
+            });
+            console.log('MongoDB connected');
+        } catch (err) {
+            console.error('MongoDB connection error:', err);
+            throw err; // Re-throw the error to prevent the app from starting
+        }
+    }
+    return mongooseConnection; // Return the connection
+};
 
+// Define the Complaint schema and model (assuming this is in modal/Complaint.js)
+const Complaint = require('./modal/Complaint');
 
-const Complaint = require('./modal/Complaint'); 
-
-app.post('/complaint', async (req, res) => {
+// Wrap your route handlers in a function that ensures connection
+const handleRequest = async (req, res, routeHandler) => {
     try {
+        await connectToDatabase();
+        await routeHandler(req, res); // Execute the actual route handler
+    } catch (error) {
+        // Handle database connection errors here, or other errors
+        console.error("Error in handleRequest:", error);
+        if (!res.headersSent) {
+             res.status(500).json({ error: 'Internal server error', message: error.message });
+        }
+    }
+};
+
+
+
+// Route to handle creating a new complaint
+app.post('/complaint', async (req, res) => {
+    await handleRequest(req, res, async (req, res) => { // Wrap handler
         const complaintData = {
             phoneNumber: req.body.phoneNumber,
             complaint: req.body.complaint,
@@ -38,37 +66,33 @@ app.post('/complaint', async (req, res) => {
         const newComplaint = new Complaint(complaintData);
         const savedComplaint = await newComplaint.save();
         res.status(201).json(savedComplaint);
-    } catch (error) {
-        console.error('Error saving complaint:', error);
-        res.status(500).json({ message: 'Failed to save complaint', error: error.message });
-    }
+    });
 });
 
+// Route to get all complaints
 app.get('/complaints', async (req, res) => {
-    try {
-        const complaints = await Complaint.find().lean(); 
+    await handleRequest(req, res, async (req, res) => {  // Wrap handler
+        const complaints = await Complaint.find().lean();
         const complaintsIST = complaints.map(complaint => ({
             ...complaint,
             createdAt: moment.utc(complaint.createdAt).tz('Asia/Kolkata').format(),
             updatedAt: moment.utc(complaint.updatedAt).tz('Asia/Kolkata').format(),
         }));
         res.status(200).json(complaintsIST);
-    } catch (error) {
-        console.error("Error fetching all complaints:", error);
-        res.status(500).json({ error: 'Failed to fetch complaints.', error: error.message });
-    }
+    });
 });
 
+// Route to update a complaint's status
 app.patch('/complaints/:id', async (req, res) => {
-    try {
+    await handleRequest(req, res, async (req, res) => {  // Wrap handler
         const complaintId = req.params.id;
         const newStatus = req.body.status;
 
         const updatedComplaint = await Complaint.findByIdAndUpdate(
             complaintId,
             { status: newStatus, updatedAt: Date.now() },
-            { new: true, runValidators: true } //  Added runValidators
-        ).lean(); 
+            { new: true, runValidators: true }
+        ).lean();
 
         if (!updatedComplaint) {
             return res.status(404).json({ message: 'Complaint not found' });
@@ -79,14 +103,12 @@ app.patch('/complaints/:id', async (req, res) => {
         }
 
         res.status(200).json(updatedComplaintIST);
-    } catch (error) {
-        console.error('Error updating complaint status:', error);
-        res.status(500).json({ message: 'Failed to update complaint status', error: error.message });
-    }
+    });
 });
 
+// Route to delete a complaint
 app.delete('/complaints/:id', async (req, res) => {
-    try {
+    await handleRequest(req, res, async (req, res) => {
         const complaintId = req.params.id;
 
         const deletedComplaint = await Complaint.findByIdAndDelete(complaintId);
@@ -96,11 +118,10 @@ app.delete('/complaints/:id', async (req, res) => {
         }
 
         res.status(200).json({ message: 'Complaint deleted successfully' });
-    } catch (error) {
-        console.error('Error deleting complaint:', error);
-        res.status(500).json({ message: 'Failed to delete complaint', error: error.message });
-    }
+    });
 });
+
+
 
 app.get('/', (req, res) => {
     res.send("Hello from the quickfix server");
@@ -110,4 +131,10 @@ app.get('/hi', (req, res) => {
     res.send("Hello World");
 });
 
+// Global error handler
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+});
+
+// Vercel export
 module.exports = app;
